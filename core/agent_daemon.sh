@@ -419,17 +419,11 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 # [修复] 逃逸 Systemd Cgroup，并引入 bash -n 语法树校验防砖机制
                 import shutil
                 import base64
-                # 动态提取部署时的源地址，废除强制写死 main 分支，保障隔离测试环境
-                repo_url = "https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
-                if os.path.exists('/opt/ip_sentinel/core/install.sh'):
-                    with open('/opt/ip_sentinel/core/install.sh', 'r') as f:
-                        for line in f:
-                            if line.startswith('REPO_RAW_URL='):
-                                repo_url = line.split('=', 1)[1].strip('"\'')
-                                break
+                # 动态提取部署时的源地址，默认回落到当前 Fork，避免审计代码与运行代码分离
+                repo_url = config_mem.get('REPO_RAW_URL') or "https://raw.githubusercontent.com/chffhc/IP-Sentinel/main"
                 
                 # 动态构建报错回执文本 (第一层 Base64 隔离换行与特殊字符)
-                err_msg = f"❌ **OTA 熔断告警**\n📍 节点: `{config_mem.get('NODE_ALIAS', '未知')}`\n⚠️ 原因: 脚本语法校验(bash -n)未通过，下载可能不完整。\n🚀 状态: 升级已取消，节点安全。"
+                err_msg = f"❌ **OTA 熔断告警**\n📍 节点: `{config_mem.get('NODE_ALIAS', '未知')}`\n⚠️ 原因: 脚本完整性或语法校验未通过，下载可能被篡改或不完整。\n🚀 状态: 升级已取消，节点安全。"
                 err_msg_b64 = base64.b64encode(err_msg.encode('utf-8')).decode('utf-8')
                 
                 tg_url = config_mem.get('TG_API_URL', '')
@@ -439,13 +433,15 @@ class AgentHandler(http.server.BaseHTTPRequestHandler):
                 # 彻底免疫因为 python 变量掺杂引号而导致的 shell 注入或截断
                 ota_script = f"""
 export SILENT_OTA="true"
+curl -fsSL {repo_url}/version.txt -o /tmp/ip_sentinel_version.txt
+AGENT_INSTALL_SHA256=$(grep '^AGENT_INSTALL_SHA256=' /tmp/ip_sentinel_version.txt | cut -d'=' -f2 | tr -d '[:space:]')
 curl -fsSL {repo_url}/core/install.sh -o /tmp/ota_agent.sh
-if bash -n /tmp/ota_agent.sh; then
+if [ -n "$AGENT_INSTALL_SHA256" ] && echo "$AGENT_INSTALL_SHA256  /tmp/ota_agent.sh" | sha256sum -c - >/dev/null 2>&1 && bash -n /tmp/ota_agent.sh; then
     bash /tmp/ota_agent.sh > /opt/ip_sentinel/logs/ota_upgrade.log 2>&1
 else
     MSG=$(echo '{err_msg_b64}' | base64 -d)
     curl -s -m 10 -X POST "{tg_url}" -d "chat_id={chat_id}" -d "text=$MSG" -d "parse_mode=Markdown" > /dev/null 2>&1
-    echo "OTA Checksum Failed: Script corrupted" > /opt/ip_sentinel/logs/ota_upgrade.log
+    echo "OTA Checksum Failed: Script corrupted or checksum mismatch" > /opt/ip_sentinel/logs/ota_upgrade.log
 fi
 """
                 ota_script_b64 = base64.b64encode(ota_script.encode('utf-8')).decode('utf-8')

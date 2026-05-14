@@ -19,9 +19,12 @@ SECURE_TMP=$(mktemp -d /tmp/ips_master_install.XXXXXX)
 trap 'rm -rf "$SECURE_TMP"' EXIT HUP INT QUIT TERM
 
 # 你的 GitHub 仓库 Raw 数据直链前缀
-REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_OWNER="${REPO_OWNER:-chffhc}"
+REPO_NAME="${REPO_NAME:-IP-Sentinel}"
+REPO_REF="${REPO_REF:-main}"
+REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_REF}}"
 # 临时改为开发地址用于测试
-# REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/v3.6.2-rc"
+# REPO_RAW_URL="https://raw.githubusercontent.com/chffhc/IP-Sentinel/v3.6.2-rc"
 
 # [核心: 动态提取 Master 专属版本锚点 (KV 解析法)]
 # 通过 grep 定位 MASTER_VERSION 行，再通过 cut 提取等号右侧的值
@@ -235,6 +238,11 @@ MASTER_DIR="$MASTER_DIR"
 IS_OFFICIAL_GATEWAY="$IS_OFFICIAL_GATEWAY"
 # [v3.6.1 新增] 司令部自身 OTA 授权标识
 ENABLE_MASTER_OTA="$ENABLE_MASTER_OTA"
+# [P0供应链加固] 固化代码来源，Master OTA 必须沿用当前部署源
+REPO_OWNER="$REPO_OWNER"
+REPO_NAME="$REPO_NAME"
+REPO_REF="$REPO_REF"
+REPO_RAW_URL="$REPO_RAW_URL"
 EOF
 fi
 
@@ -245,6 +253,13 @@ if [ "$UPGRADE_MODE" == "true" ]; then
     fi
     if ! grep -q "^ENABLE_MASTER_OTA=" "${MASTER_DIR}/master.conf"; then
         echo "ENABLE_MASTER_OTA=\"false\"" >> "${MASTER_DIR}/master.conf"
+    fi
+    # [P0供应链加固] 老司令部补齐代码来源，避免 OTA 回落到非审计上游
+    if ! grep -q "^REPO_RAW_URL=" "${MASTER_DIR}/master.conf"; then
+        echo "REPO_OWNER=\"$REPO_OWNER\"" >> "${MASTER_DIR}/master.conf"
+        echo "REPO_NAME=\"$REPO_NAME\"" >> "${MASTER_DIR}/master.conf"
+        echo "REPO_REF=\"$REPO_REF\"" >> "${MASTER_DIR}/master.conf"
+        echo "REPO_RAW_URL=\"$REPO_RAW_URL\"" >> "${MASTER_DIR}/master.conf"
     fi
 fi
 # 🛑 拦截块结束
@@ -390,5 +405,5 @@ fi
 echo -e "\n========================================================"
 echo -e "⭐ \033[33m开源不易，如果 IP-Sentinel 极大简化了您的多节点管理，请赐予我们一枚星标！\033[0m"
 echo -e "💡 \033[32m您的每一颗 Star 都是我们持续迭代架构、开发 Web 视窗化控制台的动力源泉。\033[0m"
-echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/hotyue/IP-Sentinel\033\\[点击此处直达 GitHub 仓库点亮 Star 🌟]\033]8;;\033\\\033[0m"
+echo -e "👉 \033[36m\033[4m\033]8;;https://github.com/chffhc/IP-Sentinel\033\\[点击此处直达 GitHub 仓库点亮 Star 🌟]\033]8;;\033\\\033[0m"
 echo -e "========================================================\n"

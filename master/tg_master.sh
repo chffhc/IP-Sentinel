@@ -10,7 +10,10 @@ CONF="/opt/ip_sentinel_master/master.conf"
 source "$CONF"
 
 # [核心: 运行态版本继承与云通信地址]
-REPO_RAW_URL="https://raw.githubusercontent.com/hotyue/IP-Sentinel/main"
+REPO_OWNER="${REPO_OWNER:-chffhc}"
+REPO_NAME="${REPO_NAME:-IP-Sentinel}"
+REPO_REF="${REPO_REF:-main}"
+REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_REF}}"
 
 # MASTER_VERSION 已经在上方的 source "$CONF" 中被载入
 # 如果本地极度陈旧没有该变量，才给定一个基础兜底值，避免变量为空导致崩溃
@@ -293,9 +296,9 @@ while true; do
 
                     # L0 扁平化重构：升级按钮置顶，底部追加带有 url 属性的 GitHub 引流按钮
                     if [ "$IS_OFFICIAL_GATEWAY" != "true" ]; then
-                        BTNS="[${BTN_MASTER_OTA}[{\"text\":\"🌍 进入全球雷达 (管理节点)\",\"callback_data\":\"list_nodes\"}], [{\"text\":\"🚀 唤醒全局巡逻\",\"callback_data\":\"all_run\"}, {\"text\":\"📊 获取全局简报\",\"callback_data\":\"all_reports\"}], [{\"text\":\"🔄 全网节点 OTA 热重载\",\"callback_data\":\"all_ota_confirm\"}], [{\"text\":\"🌟 前往 GitHub 点亮星标\",\"url\":\"https://github.com/hotyue/IP-Sentinel\"}]]"
+                        BTNS="[${BTN_MASTER_OTA}[{\"text\":\"🌍 进入全球雷达 (管理节点)\",\"callback_data\":\"list_nodes\"}], [{\"text\":\"🚀 唤醒全局巡逻\",\"callback_data\":\"all_run\"}, {\"text\":\"📊 获取全局简报\",\"callback_data\":\"all_reports\"}], [{\"text\":\"🔄 全网节点 OTA 热重载\",\"callback_data\":\"all_ota_confirm\"}], [{\"text\":\"🌟 前往 GitHub 点亮星标\",\"url\":\"https://github.com/chffhc/IP-Sentinel\"}]]"
                     else
-                        BTNS="[[{\"text\":\"🌍 进入全球雷达 (管理节点)\",\"callback_data\":\"list_nodes\"}], [{\"text\":\"🚀 唤醒全局巡逻\",\"callback_data\":\"all_run\"}, {\"text\":\"📊 获取全局简报\",\"callback_data\":\"all_reports\"}], [{\"text\":\"🌟 前往 GitHub 点亮星标\",\"url\":\"https://github.com/hotyue/IP-Sentinel\"}]]"
+                        BTNS="[[{\"text\":\"🌍 进入全球雷达 (管理节点)\",\"callback_data\":\"list_nodes\"}], [{\"text\":\"🚀 唤醒全局巡逻\",\"callback_data\":\"all_run\"}, {\"text\":\"📊 获取全局简报\",\"callback_data\":\"all_reports\"}], [{\"text\":\"🌟 前往 GitHub 点亮星标\",\"url\":\"https://github.com/chffhc/IP-Sentinel\"}]]"
                     fi
                     TEXT_MSG="🛡️ **IP-Sentinel 控制中枢**\n${VER_INFO}\n\n📊 节点状态: 共有 \`${NODE_COUNT}\` 台节点在线\n欢迎回来，管理者。请下达系统指令："
                     send_ui "$CHAT_ID" "$TEXT_MSG" "$BTNS"
@@ -338,15 +341,17 @@ while true; do
                         send_msg "$CHAT_ID" "⏳ 正在下载重构图纸，司令部即将进入静默重启..."
                     fi
 
-                    # 下载最新的 master install 脚本作为幽灵进程
+                    # 下载最新的 master install 脚本作为幽灵进程，并用 version.txt 固定 SHA256 完整性
+                    curl -fsSL "${REPO_RAW_URL}/version.txt" -o "/tmp/ip_sentinel_version.txt"
+                    MASTER_INSTALL_SHA256=$(grep '^MASTER_INSTALL_SHA256=' /tmp/ip_sentinel_version.txt | cut -d'=' -f2 | tr -d '[:space:]')
                     curl -fsSL "${REPO_RAW_URL}/master/install_master.sh" -o "/tmp/install_master.sh"
                     
-                    # [v3.6.3 修复] 🚀 OTA 防砖机制：严格校验脚本完整性
-                    if ! bash -n "/tmp/install_master.sh" >/dev/null 2>&1; then
+                    # [P0供应链加固] 先校验 SHA256，再执行 bash -n 防砖语法校验
+                    if [ -z "$MASTER_INSTALL_SHA256" ] || ! echo "$MASTER_INSTALL_SHA256  /tmp/install_master.sh" | sha256sum -c - >/dev/null 2>&1 || ! bash -n "/tmp/install_master.sh" >/dev/null 2>&1; then
                         if [ -n "$MSG_ID" ]; then
-                            edit_msg "$CHAT_ID" "$MSG_ID" "❌ OTA 传输受损：脚本下载不完整，已触发防砖熔断，升级取消！"
+                            edit_msg "$CHAT_ID" "$MSG_ID" "❌ OTA 完整性校验失败：脚本缺失、被篡改或下载不完整，已触发防砖熔断，升级取消！"
                         else
-                            send_msg "$CHAT_ID" "❌ OTA 传输受损：脚本下载不完整，已触发防砖熔断，升级取消！"
+                            send_msg "$CHAT_ID" "❌ OTA 完整性校验失败：脚本缺失、被篡改或下载不完整，已触发防砖熔断，升级取消！"
                         fi
                         continue
                     fi
