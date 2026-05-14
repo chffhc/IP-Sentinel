@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     enable_google TEXT DEFAULT 'true',
     enable_trust TEXT DEFAULT 'true',
     enable_ota TEXT DEFAULT 'false',
+    webhook_secret TEXT,
     PRIMARY KEY(chat_id, node_name)
 );
 
@@ -343,6 +344,11 @@ Restart=always
 RestartSec=5
 User=root
 WorkingDirectory=${MASTER_DIR}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=${MASTER_DIR}
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 

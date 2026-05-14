@@ -12,8 +12,9 @@ IP_CACHE="${INSTALL_DIR}/core/.last_ip"
 [ ! -f "$CONFIG_FILE" ] && exit 1
 source "$CONFIG_FILE"
 
-# 如果没有配置 TG，说明未开启联控模式，直接退出
+# 如果没有配置 TG，说明未开启联控模式，直接退出；联控模式必须具备独立 WEBHOOK_SECRET
 [ -z "$TG_TOKEN" ] || [ -z "$CHAT_ID" ] && exit 0
+[ -z "$WEBHOOK_SECRET" ] && exit 1
 
 # 默认 Webhook 监听端口
 AGENT_PORT=${AGENT_PORT:-9527}
@@ -91,13 +92,13 @@ def clean_used_signs():
     for s in expired:
         del USED_SIGNS[s]
 
-# 🛡️ 提取全局鉴权 Token (利用 CHAT_ID 作为 PSK 预共享密钥)
+# 🛡️ 提取独立 Webhook HMAC 密钥（禁止复用 CHAT_ID 等可见标识）
 AUTH_TOKEN = ""
 if os.path.exists('/opt/ip_sentinel/config.conf'):
     with open('/opt/ip_sentinel/config.conf', 'r') as f:
         for line in f:
             line = line.strip()
-            if line.startswith('CHAT_ID='):
+            if line.startswith('WEBHOOK_SECRET='):
                 AUTH_TOKEN = line.split('=', 1)[1].strip('"\'')
                 break
 

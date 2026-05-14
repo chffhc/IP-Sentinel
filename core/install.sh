@@ -312,6 +312,7 @@ if [ "$UPGRADE_MODE" == "false" ]; then
     read -p "请输入选择 [y/n] (默认n): " TG_CHOICE
     TG_TOKEN=""
     CHAT_ID=""
+    WEBHOOK_SECRET=""
     AGENT_PORT="9527"
     if [[ "$TG_CHOICE" =~ ^[Yy]$ ]]; then
         echo -e "\n请选择中枢接入模式 (推荐私有部署，支持后续 OTA 远程静默升级):"
@@ -365,6 +366,8 @@ if [ "$UPGRADE_MODE" == "false" ]; then
         read -p "请输入你的 Chat ID (必须准确，否则无法联控): " RAW_CHAT_ID
         # 强制只保留数字和负号，封死注入
         CHAT_ID=$(echo "$RAW_CHAT_ID" | tr -cd '0-9-')
+        # [P1安全加固] 独立生成 32 字节随机 Webhook HMAC 密钥，禁止复用可见的 CHAT_ID
+        WEBHOOK_SECRET=$(openssl rand -hex 32)
         
         # ================== [v3.0.3 变更: 智能随机高位端口生成系统] ==================
         echo -e "\n\033[36m[4.2/7] 正在构建 Webhook 安全通信隧道...\033[0m"
@@ -539,6 +542,7 @@ ENABLE_TRUST="$ENABLE_TRUST"
 TG_TOKEN="$TG_TOKEN"
 TG_API_URL="$TG_API_URL"
 CHAT_ID="$CHAT_ID"
+WEBHOOK_SECRET="$WEBHOOK_SECRET"
 AGENT_PORT="$AGENT_PORT"
 INSTALL_DIR="$INSTALL_DIR"
 LOG_FILE="${INSTALL_DIR}/logs/sentinel.log"
@@ -631,6 +635,12 @@ if [ "$UPGRADE_MODE" == "true" ]; then
         ENABLE_OTA=$(grep "^ENABLE_OTA=" "$CONFIG_FILE" | cut -d'"' -f2)
     fi
 
+    # [P1安全加固] 老节点补齐独立 Webhook HMAC 密钥；补齐后需重新向 Master 注册同步
+    if ! grep -q "^WEBHOOK_SECRET=" "$CONFIG_FILE"; then
+        WEBHOOK_SECRET=$(openssl rand -hex 32)
+        echo "WEBHOOK_SECRET=\"$WEBHOOK_SECRET\"" >> "$CONFIG_FILE"
+    fi
+
     # [P0供应链加固] 老节点补齐代码来源，避免 OTA 回落到非审计上游
     if ! grep -q "^REPO_RAW_URL=" "$CONFIG_FILE"; then
         echo "REPO_OWNER=\"$REPO_OWNER\"" >> "$CONFIG_FILE"
@@ -719,6 +729,10 @@ SyslogIdentifier=ip-sentinel
 Type=oneshot
 ExecStart=/bin/bash ${INSTALL_DIR}/core/runner.sh
 User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 EOF
@@ -747,6 +761,10 @@ SyslogIdentifier=ip-sentinel
 Type=oneshot
 ExecStart=/bin/bash ${INSTALL_DIR}/core/updater.sh
 User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 EOF
@@ -778,6 +796,10 @@ SyslogIdentifier=ip-sentinel
 Type=oneshot
 ExecStart=/bin/bash ${INSTALL_DIR}/core/tg_report.sh
 User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 EOF
@@ -806,6 +828,10 @@ ExecStart=/bin/bash ${INSTALL_DIR}/core/agent_daemon.sh
 Restart=always
 RestartSec=5
 User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 [Install]
@@ -942,8 +968,8 @@ EOF
 # ================== [v3.4.0 核心: 状态机驱动的热更新路由] ==================
 if [[ -n "$TG_TOKEN" ]] && [[ -n "$CHAT_ID" ]]; then
     
-    # [v3.6.0 核心] 发送携带全套身份属性的注册指令 (追加 ENABLE_OTA 作为第 7 个字段)
-    REG_MSG="#REGISTER#|${REGION_CODE}|${NODE_NAME}|${SAFE_PUBLIC_IP}|${AGENT_PORT}|${NODE_ALIAS}|${ENABLE_OTA}"
+    # [P1安全加固] 发送携带独立 WEBHOOK_SECRET 的注册指令，Master 用该密钥签名后续 Webhook
+    REG_MSG="#REGISTER#|${REGION_CODE}|${NODE_NAME}|${SAFE_PUBLIC_IP}|${AGENT_PORT}|${NODE_ALIAS}|${ENABLE_OTA}|${WEBHOOK_SECRET}"
     
     if [ "$UPGRADE_MODE" == "true" ]; then
         # 读取本地老版本号，如果没有则视为远古版本 v3.3.1
