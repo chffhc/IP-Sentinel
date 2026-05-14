@@ -37,6 +37,42 @@ TARGET_VERSION=${TARGET_VERSION:-"4.0.7"}
 MASTER_DIR="/opt/ip_sentinel_master"
 DB_FILE="${MASTER_DIR}/sentinel.db"
 
+# [P2安全加固] 安全加载 key=value 配置，禁止 source 执行配置文件内容
+safe_load_config() {
+    local file="$1"
+    local line key value
+    [ -f "$file" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -z "$line" ] && continue
+        case "$line" in \#*) continue ;; esac
+        case "$line" in *=*) ;; *) continue ;; esac
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        case "$key" in
+            MASTER_VERSION|TG_TOKEN|DB_FILE|MASTER_DIR|IS_OFFICIAL_GATEWAY|ENABLE_MASTER_OTA|REPO_OWNER|REPO_NAME|REPO_REF|REPO_RAW_URL) ;;
+            *) continue ;;
+        esac
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        if [ "${value#\"}" != "$value" ] && [ "${value%\"}" != "$value" ]; then
+            value="${value#\"}"
+            value="${value%\"}"
+        elif [ "${value#\'}" != "$value" ] && [ "${value%\'}" != "$value" ]; then
+            value="${value#\'}"
+            value="${value%\'}"
+        fi
+        case "$value" in
+            *[\`\$\;\&\|\<\>]*|*$'\n'*|*$'\r'*) continue ;;
+        esac
+        export "$key=$value"
+    done < "$file"
+}
+
+
 echo "========================================================"
 # [修改] 将欢迎语改为更通用的文案，因为现在不仅能部署，还能卸载
 echo "      🧠 欢迎使用 IP-Sentinel Master (控制中枢) v${TARGET_VERSION}"
@@ -53,7 +89,7 @@ if [ "$SILENT_MASTER_OTA" == "true" ]; then
     
     # 汲取原配置进入内存
     if [ -f "${MASTER_DIR}/master.conf" ]; then
-        source "${MASTER_DIR}/master.conf"
+        safe_load_config "${MASTER_DIR}/master.conf"
         
         # 同步新版本号至配置文件
         if grep -q "^MASTER_VERSION=" "${MASTER_DIR}/master.conf"; then
@@ -96,7 +132,7 @@ else
                 KEEP_DB="false"
             fi
             
-            source "${MASTER_DIR}/master.conf"
+            safe_load_config "${MASTER_DIR}/master.conf"
             
             if grep -q "^MASTER_VERSION=" "${MASTER_DIR}/master.conf"; then
                 sed -i "s/^MASTER_VERSION=.*/MASTER_VERSION=\"$TARGET_VERSION\"/" "${MASTER_DIR}/master.conf"
@@ -305,9 +341,10 @@ echo -e "\n[4/4] 正在拉取新版司令部核心引擎..."
 
 TMP_MASTER="${SECURE_TMP}/tg_master.sh"
 curl -sL "${REPO_RAW_URL}/master/tg_master.sh" -o "$TMP_MASTER"
+curl -sL "${REPO_RAW_URL}/master/lib_config.sh" -o "${SECURE_TMP}/lib_config.sh"
 
 # 🛡️ 防砖终极校验
-if [ ! -s "$TMP_MASTER" ]; then
+if [ ! -s "$TMP_MASTER" ] || [ ! -s "${SECURE_TMP}/lib_config.sh" ]; then
     echo -e "\033[31m❌ 致命错误：中枢核心代码拉取失败！网络阻断或 GitHub Raw 异常。\033[0m"
     echo "🛡️ 防砖机制触发：已中止覆盖，旧版司令部仍在安全运行中。"
     rm -f "$TMP_MASTER"
@@ -325,7 +362,8 @@ pkill -9 -f "tg_master.sh" >/dev/null 2>&1 || true
 
 # 执行物理替换
 mv "$TMP_MASTER" "${MASTER_DIR}/tg_master.sh"
-chmod +x "${MASTER_DIR}/tg_master.sh"
+mv "${SECURE_TMP}/lib_config.sh" "${MASTER_DIR}/lib_config.sh"
+chmod +x "${MASTER_DIR}/tg_master.sh" "${MASTER_DIR}/lib_config.sh"
 
 if command -v systemctl >/dev/null 2>&1; then
     echo "💡 检测到 Systemd 环境，正在部署原生守护服务..."

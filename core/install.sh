@@ -28,6 +28,42 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${
 INSTALL_DIR="/opt/ip_sentinel"
 CONFIG_FILE="${INSTALL_DIR}/config.conf"
 
+# [P2安全加固] 安全加载 key=value 配置，禁止 source 执行配置文件内容
+safe_load_config() {
+    local file="$1"
+    local line key value
+    [ -f "$file" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -z "$line" ] && continue
+        case "$line" in \#*) continue ;; esac
+        case "$line" in *=*) ;; *) continue ;; esac
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        case "$key" in
+            AGENT_VERSION|REGION_CODE|REGION_NAME|BASE_LAT|BASE_LON|LANG_PARAMS|VALID_URL_SUFFIX|ENABLE_GOOGLE|ENABLE_TRUST|TG_TOKEN|TG_API_URL|CHAT_ID|WEBHOOK_SECRET|AGENT_PORT|INSTALL_DIR|LOG_FILE|IP_PREF|PUBLIC_IP|BIND_IP|NODE_NAME|NODE_ALIAS|ENABLE_OTA|REPO_OWNER|REPO_NAME|REPO_REF|REPO_RAW_URL) ;;
+            *) continue ;;
+        esac
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        if [ "${value#\"}" != "$value" ] && [ "${value%\"}" != "$value" ]; then
+            value="${value#\"}"
+            value="${value%\"}"
+        elif [ "${value#\'}" != "$value" ] && [ "${value%\'}" != "$value" ]; then
+            value="${value#\'}"
+            value="${value%\'}"
+        fi
+        case "$value" in
+            *[\`\$\;\&\|\<\>]*|*$'\n'*|*$'\r'*) continue ;;
+        esac
+        export "$key=$value"
+    done < "$file"
+}
+
+
 # [核心: 动态提取 Agent 专属版本锚点 (KV 解析法)]
 # [修复] 增加 -L 与双栈容灾 (-4)，解决纯 V6 或 V6 优先机器连接 GitHub Raw 易超时的问题
 TARGET_VERSION=$( (curl -sL -m 5 "${REPO_RAW_URL}/version.txt" || curl -4 -sL -m 5 "${REPO_RAW_URL}/version.txt") 2>/dev/null | grep "^AGENT_VERSION=" | cut -d'=' -f2 | tr -d '[:space:]')
@@ -132,7 +168,7 @@ if [ "$SILENT_OTA" == "true" ]; then
     ACTION_CHOICE=1
     UPGRADE_MODE="true"
     KEEP_LOGS="true"
-    source "$CONFIG_FILE"
+    safe_load_config "$CONFIG_FILE"
 else
     echo -e "\n请选择操作:"
     echo "  1) 🚀 部署边缘节点 (进入全球节点配置)"
@@ -166,7 +202,7 @@ else
             fi
             
             # 将原配置读入环境变量，为后续跳过配置步骤提供燃料
-            source "$CONFIG_FILE"
+            safe_load_config "$CONFIG_FILE"
             echo -e "\033[32m✅ 已激活 [平滑升级模式]，即将跳过基础配置，直接更新核心装甲...\033[0m"
         else
             echo -e "\033[33m🔄 您选择了重新配置，旧的哨兵数据将被彻底抹除。\033[0m"
@@ -668,9 +704,10 @@ curl -sL "${REPO_RAW_URL}/core/uninstall.sh" -o "${TMP_CORE}/uninstall.sh"
 curl -sL "${REPO_RAW_URL}/core/mod_google.sh" -o "${TMP_CORE}/mod_google.sh"
 curl -sL "${REPO_RAW_URL}/core/mod_trust.sh" -o "${TMP_CORE}/mod_trust.sh"
 curl -sL "${REPO_RAW_URL}/core/mod_quality.sh" -o "${TMP_CORE}/mod_quality.sh"
+curl -sL "${REPO_RAW_URL}/core/lib_config.sh" -o "${TMP_CORE}/lib_config.sh"
 
 # 🛡️ 防砖终极校验：检查关键文件是否真实存在且不为空
-if [ ! -s "${TMP_CORE}/runner.sh" ] || [ ! -s "${TMP_CORE}/agent_daemon.sh" ]; then
+if [ ! -s "${TMP_CORE}/runner.sh" ] || [ ! -s "${TMP_CORE}/agent_daemon.sh" ] || [ ! -s "${TMP_CORE}/lib_config.sh" ]; then
     echo -e "\033[31m❌ 致命错误：核心代码拉取失败！网络阻断或 GitHub Raw 异常。\033[0m"
     echo "🛡️ 防砖机制触发：已中止覆盖，旧版哨兵引擎仍安全存活中。"
     rm -rf "$TMP_CORE"

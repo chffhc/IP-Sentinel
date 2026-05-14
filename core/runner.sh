@@ -13,7 +13,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "配置文件丢失，请重新运行 install.sh"
     exit 1
 fi
-source "$CONFIG_FILE"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 # ================== [新增: 文件排他锁，防止并发重入引发内存雪崩] ==================
 exec 200>"/tmp/ip_sentinel_runner.lock"

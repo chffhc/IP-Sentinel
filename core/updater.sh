@@ -21,7 +21,8 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${
 if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
-source "$CONFIG_FILE"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 # 2. 全局日志写入函数 (v3.4.0 引入版本探针)
 log() {

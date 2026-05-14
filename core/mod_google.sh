@@ -6,11 +6,13 @@
 # ==========================================================
 
 MODULE_NAME="Google"
-CONFIG_FILE="/opt/ip_sentinel/config.conf"
+INSTALL_DIR="/opt/ip_sentinel"
+CONFIG_FILE="${INSTALL_DIR}/config.conf"
 
 # 1. 加载冷数据配置
 if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
+    . "${INSTALL_DIR}/core/lib_config.sh"
+    safe_load_config "$CONFIG_FILE" || exit 1
 else
     echo "配置文件丢失！退出执行。"
     exit 1

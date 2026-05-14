@@ -3,7 +3,10 @@
 # IP-Sentinel: 深海声呐 (IP 质量全维异步检测模块 v4.0.0)
 # ==========================================================
 
-source /opt/ip_sentinel/config.conf
+INSTALL_DIR="/opt/ip_sentinel"
+CONFIG_FILE="${INSTALL_DIR}/config.conf"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 # ==========================================
 # 1. 动态网络锚定与协议自适应 (专为多 IP / NAT 架构打造)

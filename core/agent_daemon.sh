@@ -10,7 +10,8 @@ CONFIG_FILE="${INSTALL_DIR}/config.conf"
 IP_CACHE="${INSTALL_DIR}/core/.last_ip"
 
 [ ! -f "$CONFIG_FILE" ] && exit 1
-source "$CONFIG_FILE"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 # 如果没有配置 TG，说明未开启联控模式，直接退出；联控模式必须具备独立 WEBHOOK_SECRET
 [ -z "$TG_TOKEN" ] || [ -z "$CHAT_ID" ] && exit 0

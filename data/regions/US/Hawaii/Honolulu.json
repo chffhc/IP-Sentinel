@@ -1,0 +1,24 @@
+{
+  "region_name": "United States - Hawaii (Honolulu)",
+  "google_module": {
+    "base_lat": 21.3069,
+    "base_lon": -157.8583,
+    "lang_params": "hl=en-US&gl=US",
+    "valid_url_suffix": "com"
+  },
+  "trust_module": {
+    "white_urls": [],
+    "static_urls": [
+      "https://www.honolulu.gov/",
+      "https://portal.ehawaii.gov/",
+      "https://www.hawaii.edu/",
+      "https://www.weather.gov/hfo/",
+      "https://www.usa.gov/",
+      "https://www.irs.gov/",
+      "https://www.usps.com/",
+      "https://www.chase.com/",
+      "https://www.amazon.com/",
+      "https://www.walmart.com/"
+    ]
+  }
+}

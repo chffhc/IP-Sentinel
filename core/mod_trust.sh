@@ -18,7 +18,8 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${
 
 # 1. 基础环境校验
 [ ! -f "$CONFIG_FILE" ] && exit 1
-source "$CONFIG_FILE"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 REGION=${REGION_CODE:-"US"}
 LOG_FILE="${INSTALL_DIR}/logs/sentinel.log"

@@ -7,7 +7,8 @@
 
 CONF="/opt/ip_sentinel_master/master.conf"
 [ ! -f "$CONF" ] && exit 1
-source "$CONF"
+. "/opt/ip_sentinel_master/lib_config.sh"
+safe_load_config "$CONF" || exit 1
 
 # [核心: 运行态版本继承与云通信地址]
 REPO_OWNER="${REPO_OWNER:-chffhc}"
@@ -15,7 +16,7 @@ REPO_NAME="${REPO_NAME:-IP-Sentinel}"
 REPO_REF="${REPO_REF:-main}"
 REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_REF}}"
 
-# MASTER_VERSION 已经在上方的 source "$CONF" 中被载入
+# MASTER_VERSION 已经由上方 safe_load_config 从 master.conf 中载入
 # 如果本地极度陈旧没有该变量，才给定一个基础兜底值，避免变量为空导致崩溃
 MASTER_VERSION=${MASTER_VERSION:-"3.5.0"}
 

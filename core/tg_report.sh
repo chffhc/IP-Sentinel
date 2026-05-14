@@ -11,7 +11,8 @@ LOG_FILE="${INSTALL_DIR}/logs/sentinel.log"
 
 # 1. 加载配置并自检
 if [ ! -f "$CONFIG_FILE" ]; then exit 1; fi
-source "$CONFIG_FILE"
+. "${INSTALL_DIR}/core/lib_config.sh"
+safe_load_config "$CONFIG_FILE" || exit 1
 
 if [ -z "$TG_TOKEN" ] || [ -z "$CHAT_ID" ]; then
     echo "⚠️ 未配置 Telegram 机器人参数，取消播报。"
