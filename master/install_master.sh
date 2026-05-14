@@ -342,12 +342,13 @@ echo -e "\n[4/4] 正在拉取新版司令部核心引擎..."
 TMP_MASTER="${SECURE_TMP}/tg_master.sh"
 curl -sL "${REPO_RAW_URL}/master/tg_master.sh" -o "$TMP_MASTER"
 curl -sL "${REPO_RAW_URL}/master/lib_config.sh" -o "${SECURE_TMP}/lib_config.sh"
+curl -sL "${REPO_RAW_URL}/master/lib_db.sh" -o "${SECURE_TMP}/lib_db.sh"
 
 # 🛡️ 防砖终极校验
-if [ ! -s "$TMP_MASTER" ] || [ ! -s "${SECURE_TMP}/lib_config.sh" ]; then
+if [ ! -s "$TMP_MASTER" ] || [ ! -s "${SECURE_TMP}/lib_config.sh" ] || [ ! -s "${SECURE_TMP}/lib_db.sh" ]; then
     echo -e "\033[31m❌ 致命错误：中枢核心代码拉取失败！网络阻断或 GitHub Raw 异常。\033[0m"
     echo "🛡️ 防砖机制触发：已中止覆盖，旧版司令部仍在安全运行中。"
-    rm -f "$TMP_MASTER"
+    rm -f "$TMP_MASTER" "${SECURE_TMP}/lib_config.sh" "${SECURE_TMP}/lib_db.sh"
     exit 1
 fi
 
@@ -363,7 +364,8 @@ pkill -9 -f "tg_master.sh" >/dev/null 2>&1 || true
 # 执行物理替换
 mv "$TMP_MASTER" "${MASTER_DIR}/tg_master.sh"
 mv "${SECURE_TMP}/lib_config.sh" "${MASTER_DIR}/lib_config.sh"
-chmod +x "${MASTER_DIR}/tg_master.sh" "${MASTER_DIR}/lib_config.sh"
+mv "${SECURE_TMP}/lib_db.sh" "${MASTER_DIR}/lib_db.sh"
+chmod +x "${MASTER_DIR}/tg_master.sh" "${MASTER_DIR}/lib_config.sh" "${MASTER_DIR}/lib_db.sh"
 
 if command -v systemctl >/dev/null 2>&1; then
     echo "💡 检测到 Systemd 环境，正在部署原生守护服务..."

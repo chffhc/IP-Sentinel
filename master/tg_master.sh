@@ -5,10 +5,12 @@
 # 核心功能: 监听 TG、操作 SQLite、Webhook 精准调度、403权限拦截、僵尸节点清理
 # ==========================================================
 
-CONF="/opt/ip_sentinel_master/master.conf"
+SCRIPT_DIR="/opt/ip_sentinel_master"
+CONF="${SCRIPT_DIR}/master.conf"
 [ ! -f "$CONF" ] && exit 1
-. "/opt/ip_sentinel_master/lib_config.sh"
+. "$SCRIPT_DIR/lib_config.sh"
 safe_load_config "$CONF" || exit 1
+. "$SCRIPT_DIR/lib_db.sh"
 
 # [核心: 运行态版本继承与云通信地址]
 REPO_OWNER="${REPO_OWNER:-chffhc}"
@@ -68,11 +70,6 @@ edit_ui() {
         -d "{\"chat_id\":\"$1\",\"message_id\":\"$2\",\"text\":\"$3\",\"parse_mode\":\"Markdown\",\"reply_markup\":{\"inline_keyboard\":$4}}" > /dev/null
 }
 
-# 数据库执行函数 (v3.6.3 终极静默版: 动用 .timeout 点命令防泄露)
-db_exec() {
-    printf ".timeout 5000\n%s\n" "$1" | sqlite3 "$DB_FILE"
-}
-
 # ================== [v3.0.4/P1 核心: 动态 HMAC 签名生成器] ==================
 # 用法: generate_signed_url <IP> <PORT> <PATH> <WEBHOOK_SECRET>
 generate_signed_url() {
@@ -83,7 +80,7 @@ generate_signed_url() {
     local current_t=$(date +%s)
 
     if [ -z "$webhook_secret" ]; then
-        webhook_secret=$(db_exec "SELECT webhook_secret FROM nodes WHERE chat_id='$CHAT_ID' AND agent_ip='$target_ip' AND agent_port='$target_port' LIMIT 1;" | tr -cd 'a-fA-F0-9' | cut -c 1-64)
+        webhook_secret=$(db_query "SELECT webhook_secret FROM nodes WHERE chat_id=@p1 AND agent_ip=@p2 AND agent_port=@p3 LIMIT 1;" "$CHAT_ID" "$target_ip" "$target_port" | tr -cd 'a-fA-F0-9' | cut -c 1-64)
     fi
     if [ -z "$webhook_secret" ]; then
         echo ""
@@ -164,7 +161,7 @@ while true; do
 
                 if [ -n "$NODE_ID" ] && [ -n "$SCORE" ]; then
                     # 1. 写入 SQLite
-                    db_exec "INSERT INTO ip_trend_log (node_name, scam_score, goog_status, nf_status, gpt_status) VALUES ('$NODE_ID', '$SCORE', '$GOOG_ST', '$NF_ST', '$GPT_ST');"
+                    db_query "INSERT INTO ip_trend_log (node_name, scam_score, goog_status, nf_status, gpt_status) VALUES (@p1, @p2, @p3, @p4, @p5);" "$NODE_ID" "$SCORE" "$GOOG_ST" "$NF_ST" "$GPT_ST"
 
                     # [体验优化] 弹出顶部 Toast 气泡，提示入库成功
                     if [ -n "$CB_ID" ]; then
@@ -267,11 +264,11 @@ while true; do
                 fi
 
                 # [核心] 入库时追加 node_alias、enable_ota 与每节点 webhook_secret 字段
-                db_exec "INSERT INTO nodes (chat_id, node_name, agent_ip, agent_port, last_seen, region, node_alias, enable_ota, webhook_secret) VALUES ('$CHAT_ID', '$NODE_NAME', '$AGENT_IP', '$AGENT_PORT', CURRENT_TIMESTAMP, '$AGENT_REGION', '$NODE_ALIAS', '$AGENT_OTA', '$WEBHOOK_SECRET') ON CONFLICT(chat_id, node_name) DO UPDATE SET agent_ip='$AGENT_IP', agent_port='$AGENT_PORT', last_seen=CURRENT_TIMESTAMP, region='$AGENT_REGION', node_alias='$NODE_ALIAS', enable_ota='$AGENT_OTA', webhook_secret='$WEBHOOK_SECRET';"
+                db_query "INSERT INTO nodes (chat_id, node_name, agent_ip, agent_port, last_seen, region, node_alias, enable_ota, webhook_secret) VALUES (@p1, @p2, @p3, @p4, CURRENT_TIMESTAMP, @p5, @p6, @p7, @p8) ON CONFLICT(chat_id, node_name) DO UPDATE SET agent_ip=@p3, agent_port=@p4, last_seen=CURRENT_TIMESTAMP, region=@p5, node_alias=@p6, enable_ota=@p7, webhook_secret=@p8;" "$CHAT_ID" "$NODE_NAME" "$AGENT_IP" "$AGENT_PORT" "$AGENT_REGION" "$NODE_ALIAS" "$AGENT_OTA" "$WEBHOOK_SECRET"
                 send_msg "$CHAT_ID" "✅ **司令部确认 (v${MASTER_VERSION})**%0A节点 \`${NODE_ALIAS}\` 档案已录入！"
 
                 # ================== [v3.1.3 丝滑连招: 直接呼出全球大区雷达] ==================
-                REGION_DATA=$(db_exec "SELECT region, COUNT(*) FROM nodes WHERE chat_id='$CHAT_ID' GROUP BY region;")
+                REGION_DATA=$(db_query "SELECT region, COUNT(*) FROM nodes WHERE chat_id=@p1 GROUP BY region;" "$CHAT_ID")
                 if [ -n "$REGION_DATA" ]; then
                     BTNS="["
                     while IFS='|' read -r REGION_NAME NODE_COUNT; do
@@ -306,7 +303,7 @@ while true; do
                         fi
                     fi
 
-                    NODE_COUNT=$(db_exec "SELECT COUNT(*) FROM nodes WHERE chat_id='$CHAT_ID';")
+                    NODE_COUNT=$(db_query "SELECT COUNT(*) FROM nodes WHERE chat_id=@p1;" "$CHAT_ID")
                     [ -z "$NODE_COUNT" ] && NODE_COUNT=0
 
                     # L0 扁平化重构：升级按钮置顶，底部追加带有 url 属性的 GitHub 引流按钮
@@ -326,7 +323,7 @@ while true; do
                     ;;
 
                 "all_ota_execute")
-                    NODE_DATA=$(db_exec "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND enable_ota='true';")
+                    NODE_DATA=$(db_query "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND enable_ota=@p2;" "$CHAT_ID" "true")
                     if [ -z "$NODE_DATA" ]; then
                         send_msg "$CHAT_ID" "⚠️ 您名下暂无开启 OTA 权限的在线节点。"
                     else
@@ -388,7 +385,7 @@ while true; do
                     ;;
 
                 "all_reports")
-                    NODE_DATA=$(db_exec "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID';")
+                    NODE_DATA=$(db_query "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=@p1;" "$CHAT_ID")
                     if [ -z "$NODE_DATA" ]; then
                         send_msg "$CHAT_ID" "⚠️ 您名下暂无在线节点。"
                     else
@@ -405,7 +402,7 @@ while true; do
 
                 # ================== [补充缺失的全节点一键维护功能] ==================
                 "all_run")
-                    NODE_DATA=$(db_exec "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID';")
+                    NODE_DATA=$(db_query "SELECT node_name, agent_ip, agent_port FROM nodes WHERE chat_id=@p1;" "$CHAT_ID")
                     if [ -z "$NODE_DATA" ]; then
                         send_msg "$CHAT_ID" "⚠️ 您名下暂无在线节点。"
                     else
@@ -431,7 +428,7 @@ while true; do
                         CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
                         # [加密通讯逻辑]
-                        AGENT_INFO=$(db_exec "SELECT agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                        AGENT_INFO=$(db_query "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                         AGENT_IP=$(echo "$AGENT_INFO" | cut -d'|' -f1)
                         AGENT_PORT=$(echo "$AGENT_INFO" | cut -d'|' -f2)
 
@@ -464,12 +461,12 @@ while true; do
                         TARGET_NODE=$(echo "$TARGET_NODE" | tr -cd 'a-zA-Z0-9_.-')
                         CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                        TREND_DATA=$(db_exec "SELECT datetime(check_time, 'localtime'), scam_score, goog_status, nf_status, gpt_status FROM ip_trend_log WHERE node_name='$TARGET_NODE' ORDER BY check_time DESC LIMIT 15;")
+                        TREND_DATA=$(db_query "SELECT datetime(check_time, 'localtime'), scam_score, goog_status, nf_status, gpt_status FROM ip_trend_log WHERE node_name=@p1 ORDER BY check_time DESC LIMIT 15;" "$TARGET_NODE")
 
                         if [ -z "$TREND_DATA" ]; then
                             send_msg "$CHAT_ID" "⚠️ 节点 \`$TARGET_NODE\` 暂无历史体检档案。请先执行 /quality 投放声呐进行探测。"
                         else
-                            TARGET_ALIAS=$(db_exec "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                            TARGET_ALIAS=$(db_query "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                             [ -z "$TARGET_ALIAS" ] && TARGET_ALIAS="$TARGET_NODE"
 
                             TEXT_RES="📈 *[${TARGET_ALIAS}] 历史态势感知 (近15次)*\n\n"
@@ -503,7 +500,7 @@ while true; do
 
                 "list_nodes")
                     # 【V3.1.3】一级菜单：大区聚合并列出数量
-                    REGION_DATA=$(db_exec "SELECT region, COUNT(*) FROM nodes WHERE chat_id='$CHAT_ID' GROUP BY region;")
+                    REGION_DATA=$(db_query "SELECT region, COUNT(*) FROM nodes WHERE chat_id=@p1 GROUP BY region;" "$CHAT_ID")
                     if [ -z "$REGION_DATA" ]; then
                         send_msg "$CHAT_ID" "⚠️ 您名下暂无在线节点，请先在边缘机执行部署。"
                     else
@@ -525,7 +522,7 @@ while true; do
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
                     # [v3.5.2] 提取物理主键和展示别名
-                    NODE_LIST=$(db_exec "SELECT node_name, IFNULL(node_alias, node_name) FROM nodes WHERE chat_id='$CHAT_ID' AND region='$TARGET_REGION';")
+                    NODE_LIST=$(db_query "SELECT node_name, IFNULL(node_alias, node_name) FROM nodes WHERE chat_id=@p1 AND region=@p2;" "$CHAT_ID" "$TARGET_REGION")
                     if [ -z "$NODE_LIST" ]; then
                         send_msg "$CHAT_ID" "⚠️ 该战区下暂无可用节点。"
                     else
@@ -556,11 +553,11 @@ while true; do
 
                 manage:*)
                     TARGET_NODE=$(echo "${TEXT#*:}" | tr -cd 'a-zA-Z0-9_.-')
-                    TARGET_ALIAS=$(db_exec "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    TARGET_ALIAS=$(db_query "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     [ -z "$TARGET_ALIAS" ] && TARGET_ALIAS="$TARGET_NODE"
 
                     # 抓取节点全景元数据
-                    TOGGLE_INFO=$(db_exec "SELECT enable_google, enable_trust, enable_ota, agent_ip, IFNULL(last_seen, '未知') FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    TOGGLE_INFO=$(db_query "SELECT enable_google, enable_trust, enable_ota, agent_ip, IFNULL(last_seen, '未知') FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     ST_GOOGLE=$(echo "$TOGGLE_INFO" | cut -d'|' -f1)
                     ST_TRUST=$(echo "$TOGGLE_INFO" | cut -d'|' -f2)
                     ST_OTA=$(echo "$TOGGLE_INFO" | cut -d'|' -f3)
@@ -604,7 +601,7 @@ while true; do
                     IFS=':' read -r CMD MOD_NAME TARGET_NODE TARGET_STATE <<< "$TEXT"
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                    AGENT_INFO=$(db_exec "SELECT agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    AGENT_INFO=$(db_query "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     AGENT_IP=$(echo "$AGENT_INFO" | cut -d'|' -f1)
                     AGENT_PORT=$(echo "$AGENT_INFO" | cut -d'|' -f2)
 
@@ -616,16 +613,20 @@ while true; do
 
                         if [[ "$RESPONSE" == *"Action Accepted"* ]]; then
                             # 下发成功，更新 DB，原位重绘
-                            db_exec "UPDATE nodes SET enable_${MOD_NAME}='$TARGET_STATE' WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE';"
+                            case "$MOD_NAME" in
+                                google|trust) toggle_column="enable_${MOD_NAME}" ;;
+                                *) send_msg "$CHAT_ID" "⛔ **安全拦截**：未知模块名，拒绝更新。"; continue ;;
+                            esac
+                            db_query "UPDATE nodes SET ${toggle_column}=@p1 WHERE chat_id=@p2 AND node_name=@p3;" "$TARGET_STATE" "$CHAT_ID" "$TARGET_NODE"
 
-                            TOGGLE_INFO=$(db_exec "SELECT enable_google, enable_trust FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                            TOGGLE_INFO=$(db_query "SELECT enable_google, enable_trust FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                             ST_GOOGLE=$(echo "$TOGGLE_INFO" | cut -d'|' -f1)
                             ST_TRUST=$(echo "$TOGGLE_INFO" | cut -d'|' -f2)
                             [ "$ST_GOOGLE" == "true" ] && BTN_G="🔴 停用 Google 纠偏" && ACT_G="false" || { BTN_G="🟢 启用 Google 纠偏"; ACT_G="true"; }
                             [ "$ST_TRUST" == "true" ] && BTN_T="🔴 停用信用净化" && ACT_T="false" || { BTN_T="🟢 启用信用净化"; ACT_T="true"; }
 
                             # 切换后直接复用扁平化 L3 面板的重绘逻辑
-                            TOGGLE_INFO=$(db_exec "SELECT enable_google, enable_trust, enable_ota, agent_ip, IFNULL(last_seen, '未知') FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                            TOGGLE_INFO=$(db_query "SELECT enable_google, enable_trust, enable_ota, agent_ip, IFNULL(last_seen, '未知') FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                             ST_GOOGLE=$(echo "$TOGGLE_INFO" | cut -d'|' -f1)
                             ST_TRUST=$(echo "$TOGGLE_INFO" | cut -d'|' -f2)
                             ST_OTA=$(echo "$TOGGLE_INFO" | cut -d'|' -f3)
@@ -647,7 +648,7 @@ while true; do
                             BTN_DANGER="[{\"text\":\"🗑️ 从中枢销毁该档案\",\"callback_data\":\"del:$TARGET_NODE\"}, {\"text\":\"⬅️ 返回战区列表\",\"callback_data\":\"list_nodes\"}]"
 
                             BTNS="[$BTN_ACTION, $BTN_TOGGLE, $BTN_CONFIG, $BTN_DANGER]"
-                            TARGET_ALIAS=$(db_exec "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                            TARGET_ALIAS=$(db_query "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
 
                             TEXT_MSG="⚙️ **目标锁定**: \`$TARGET_ALIAS\`\n(底层标识: \`$TARGET_NODE\`)\n🌐 IP 坐标: \`$A_IP\`\n🕒 最后通讯: \`$LAST_SEEN\`\n\n✅ **执行成功**: 模块 [$MOD_NAME] 状态已切换为 $TARGET_STATE！"
                             edit_ui "$CHAT_ID" "$MSG_ID" "$TEXT_MSG" "$BTNS"
@@ -664,12 +665,12 @@ while true; do
 
                     # 🛡️ [终极防线: 防越权横向打击] 先校验该节点是否真实属于当前操作者！
                     # 因为趋势库中没有 Chat_ID 标识，不校验直接删会给黑客伪造回调清空他人数据的机会！
-                    VALID_OWNER=$(db_exec "SELECT 1 FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    VALID_OWNER=$(db_query "SELECT 1 FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
 
                     if [ "$VALID_OWNER" == "1" ]; then
                         # 验权通过，执行原子化级联销毁：同时抹除主配置与历史污染趋势
-                        db_exec "DELETE FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE';"
-                        db_exec "DELETE FROM ip_trend_log WHERE node_name='$TARGET_NODE';"
+                        db_query "DELETE FROM nodes WHERE chat_id=@p1 AND node_name=@p2;" "$CHAT_ID" "$TARGET_NODE"
+                        db_query "DELETE FROM ip_trend_log WHERE node_name=@p1;" "$TARGET_NODE"
                         send_msg "$CHAT_ID" "🗑️ 节点 \`$TARGET_NODE\` 的档案及历史污染趋势已从司令部彻底销毁！"
                     else
                         send_msg "$CHAT_ID" "⛔ **安全拦截**：销毁失败。目标节点不存在或您无权越权操作！"
@@ -677,7 +678,7 @@ while true; do
                     fi
 
                     # 剔除后直接返回上级一级雷达菜单
-                    REGION_DATA=$(db_exec "SELECT region, COUNT(*) FROM nodes WHERE chat_id='$CHAT_ID' GROUP BY region;")
+                    REGION_DATA=$(db_query "SELECT region, COUNT(*) FROM nodes WHERE chat_id=@p1 GROUP BY region;" "$CHAT_ID")
                     if [ -z "$REGION_DATA" ]; then
                         send_msg "$CHAT_ID" "⚠️ 当前司令部已无任何节点挂载。"
                     else
@@ -706,7 +707,7 @@ while true; do
                     IFS=':' read -r CMD TARGET_NODE NEW_ALIAS <<< "$TEXT"
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                    AGENT_INFO=$(db_exec "SELECT agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    AGENT_INFO=$(db_query "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     AGENT_IP=$(echo "$AGENT_INFO" | cut -d'|' -f1)
                     AGENT_PORT=$(echo "$AGENT_INFO" | cut -d'|' -f2)
 
@@ -725,7 +726,7 @@ while true; do
                             send_msg "$CHAT_ID" "❌ 指令下发超时！为防范劫持风险，已终止请求。"
                         elif [[ "$RESPONSE" == *"Action Accepted"* ]]; then
                             # [v3.5.2 极致丝滑] 确认 Agent 修改成功后，Master 立即自动同步本地 SQLite 数据库！
-                            db_exec "UPDATE nodes SET node_alias='$NEW_ALIAS' WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE';"
+                            db_query "UPDATE nodes SET node_alias=@p1 WHERE chat_id=@p2 AND node_name=@p3;" "$NEW_ALIAS" "$CHAT_ID" "$TARGET_NODE"
                             send_msg "$CHAT_ID" "✅ 通讯成功！节点别名已下发: \`$NEW_ALIAS\`%0A*(司令部档案已自动刷新，雷达面板已同步)*"
                         else
                             # 增加输出 RESPONSE 调试信息，排查任何拦截死因
@@ -747,7 +748,7 @@ while true; do
                     TARGET_NODE=$(echo "${TEXT#*:}" | tr -cd 'a-zA-Z0-9_.-')
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                    AGENT_INFO=$(db_exec "SELECT agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    AGENT_INFO=$(db_query "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     AGENT_IP=$(echo "$AGENT_INFO" | cut -d'|' -f1)
                     AGENT_PORT=$(echo "$AGENT_INFO" | cut -d'|' -f2)
 
@@ -786,7 +787,7 @@ while true; do
                     TARGET_NODE=$(echo "$TEXT" | cut -d':' -f2 | tr -cd 'a-zA-Z0-9_.-')
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                    AGENT_INFO=$(db_exec "SELECT agent_ip, agent_port FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                    AGENT_INFO=$(db_query "SELECT agent_ip, agent_port FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                     AGENT_IP=$(echo "$AGENT_INFO" | cut -d'|' -f1)
                     AGENT_PORT=$(echo "$AGENT_INFO" | cut -d'|' -f2)
 
@@ -838,12 +839,12 @@ while true; do
                     TARGET_NODE=$(echo "${TEXT#*:}" | tr -cd 'a-zA-Z0-9_.-')
                     CHAT_ID=$(echo "$CHAT_ID" | tr -cd '0-9-')
 
-                    TREND_DATA=$(db_exec "SELECT datetime(check_time, 'localtime'), scam_score, goog_status, nf_status, gpt_status FROM ip_trend_log WHERE node_name='$TARGET_NODE' ORDER BY check_time DESC LIMIT 15;")
+                    TREND_DATA=$(db_query "SELECT datetime(check_time, 'localtime'), scam_score, goog_status, nf_status, gpt_status FROM ip_trend_log WHERE node_name=@p1 ORDER BY check_time DESC LIMIT 15;" "$TARGET_NODE")
 
                     if [ -z "$TREND_DATA" ]; then
                         TEXT_RES="⚠️ 节点 \`$TARGET_NODE\` 暂无历史体检档案。请先执行 [🔍 投放深海声呐] 进行探测。"
                     else
-                        TARGET_ALIAS=$(db_exec "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id='$CHAT_ID' AND node_name='$TARGET_NODE' LIMIT 1;")
+                        TARGET_ALIAS=$(db_query "SELECT IFNULL(node_alias, node_name) FROM nodes WHERE chat_id=@p1 AND node_name=@p2 LIMIT 1;" "$CHAT_ID" "$TARGET_NODE")
                         [ -z "$TARGET_ALIAS" ] && TARGET_ALIAS="$TARGET_NODE"
 
                         TEXT_RES="📈 *[${TARGET_ALIAS}] 历史态势感知 (近15次)*\n\n"
